@@ -1,5 +1,5 @@
 // ============================================================================
-// OTONOM — v4.11 (v4.10 düzeltmesi: TTS iyileştirmeleri, sihirli sayılar sabitlere taşındı, sessiz hatalar loglandı)
+// OTONOM — v4.12 (v4.11 düzeltmesi: mimo-v2.5-pro audio desteklemiyor, sadece mimo-v2.5-tts kullanılır)
 // Gemini AI Studio Canvas Uyumlu Versiyon
 // ============================================================================
 // Akış: S1 → M1 analiz → 2 AI görsel → S2 → M2 analiz → 2 AI görsel → ...
@@ -2234,14 +2234,9 @@ class MediaSynthesisService {
         if (!text || voice === 'none') return null;
         let cleanText = text.replace(/[*_#"']/g, '').replace(/\.\.\./g, ', ').replace(/\n/g, ' ').replace(/[:;/\\|{}[\]<>^~`]/g, ', ').replace(/\s+/g, ' ').trim();
         if (cleanText.length < 2) return null;
-        // Önce Mimo v2.5 Pro (OpenAI audio formatı, yüksek kalite)
+        // Mimo v2.5 TTS (user+assistant formatı)
         try {
-            const audioData = await MediaSynthesisService._generateMimoTTS(cleanText, 'mimo-v2.5-pro');
-            if (audioData) return audioData;
-        } catch (e) { addSystemLog(`Mimo Pro TTS hatası: ${e.message}`, 'warn'); }
-        // Fallback: Mimo TTS modeli
-        try {
-            const audioData = await MediaSynthesisService._generateMimoTTS(cleanText, 'mimo-v2.5-tts');
+            const audioData = await MediaSynthesisService._generateMimoTTS(cleanText);
             if (audioData) return audioData;
         } catch (e) { addSystemLog(`Mimo TTS hatası: ${e.message}`, 'warn'); }
         // SpeechSynthesis dene
@@ -2276,14 +2271,10 @@ class MediaSynthesisService {
 
 
 
-    static async _generateMimoTTS(text, modelName = 'mimo-v2.5-pro') {
-        const payload = modelName === 'mimo-v2.5-pro' ? {
-            model: modelName,
-            messages: [{ role: 'user', content: text }],
-            modalities: ['text', 'audio'],
-            audio: { voice: 'alloy', format: 'wav' }
-        } : {
-            model: modelName,
+    static async _generateMimoTTS(text) {
+        // mimo-v2.5-tts: user+assistant(empty) formatı ile ses üretir
+        const payload = {
+            model: 'mimo-v2.5-tts',
             messages: [
                 { role: 'user', content: text },
                 { role: 'assistant', content: '' }
@@ -2308,7 +2299,6 @@ class MediaSynthesisService {
         if (headerStr === 'RIFF') {
             wavBuffer = bytes.buffer;
             const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-            const fmtSize = view.getUint32(16, true);
             const audioFormat = view.getUint16(20, true);
             const numChannels = view.getUint16(22, true);
             const wavSampleRate = view.getUint32(24, true);
@@ -5239,7 +5229,7 @@ export default function App() {
                     <h1 className="text-xl md:text-3xl font-black tracking-tight text-white whitespace-nowrap">OTONOM</h1>
                     <div className="bg-indigo-900/40 border-2 border-indigo-500/50 px-3 py-1.5 rounded-full shadow-[0_0_20px_rgba(99,102,241,0.3)]">
                     <p className="text-indigo-300 text-[10px] md:text-xs font-black tracking-widest uppercase">
-                             Otonom v4.11 <span className="mx-1 text-white">•</span> One-Page
+                             Otonom v4.12 <span className="mx-1 text-white">•</span> One-Page
                          </p>
                     </div>
                 </div>
