@@ -1,5 +1,5 @@
 // ============================================================================
-// OTONOM — v4.12 (v4.11 düzeltmesi: mimo-v2.5-pro audio desteklemiyor, sadece mimo-v2.5-tts kullanılır)
+// OTONOM — v4.13 (v4.12 düzeltmesi: Gemini API native TTS eklendi, yüksek kaliteli Türkçe seslendirme)
 // Gemini AI Studio Canvas Uyumlu Versiyon
 // ============================================================================
 // Akış: S1 → M1 analiz → 2 AI görsel → S2 → M2 analiz → 2 AI görsel → ...
@@ -2234,12 +2234,17 @@ class MediaSynthesisService {
         if (!text || voice === 'none') return null;
         let cleanText = text.replace(/[*_#"']/g, '').replace(/\.\.\./g, ', ').replace(/\n/g, ' ').replace(/[:;/\\|{}[\]<>^~`]/g, ', ').replace(/\s+/g, ' ').trim();
         if (cleanText.length < 2) return null;
-        // Mimo v2.5 TTS (user+assistant formatı)
+        // 1. Gemini API native TTS (en yüksek kalite)
+        try {
+            const audioData = await MediaSynthesisService._generateGeminiTTS(cleanText);
+            if (audioData) return audioData;
+        } catch (e) { addSystemLog(`Gemini TTS hatası: ${e.message}`, 'warn'); }
+        // 2. Mimo TTS fallback
         try {
             const audioData = await MediaSynthesisService._generateMimoTTS(cleanText);
             if (audioData) return audioData;
         } catch (e) { addSystemLog(`Mimo TTS hatası: ${e.message}`, 'warn'); }
-        // SpeechSynthesis dene
+        // 3. SpeechSynthesis dene
         try {
             return await MediaSynthesisService._generateSpeechSynth(cleanText);
         } catch (e) { addSystemLog(`SpeechSynthesis hatası: ${e.message}, fallback ses üretiliyor...`, 'warn'); }
@@ -2247,26 +2252,53 @@ class MediaSynthesisService {
         return MediaSynthesisService._generateToneAudio(cleanText);
     }
 
+    // Gemini API native TTS (responseModalities: AUDIO)
+    // Desteklenen: gemini-2.0-flash, gemini-2.5-flash-preview
     static async _generateGeminiTTS(text) {
-        const url = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${getApiKey()}`;
+        const apiKey = getApiKey();
+        if (!apiKey) throw new Error('Gemini API key yok');
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
         const r = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                input: { text },
-                voice: { languageCode: 'tr-TR', name: 'tr-TR-Standard-A', ssmlGender: 'MALE' },
-                audioConfig: { audioEncoding: 'LINEAR16', speakingRate: 1.0, pitch: 0 }
+                contents: [{ parts: [{ text: `Aşağıdaki metni Türkçe olarak doğal ve akıcı bir şekilde seslendir. Sadece seslendir, başka bir şey söyleme:\n\n${text}` }] }],
+                generationConfig: {
+                    responseModalities: ['AUDIO'],
+                    speechConfig: {
+                        voiceConfig: {
+                            prebuiltVoiceConfig: { voiceName: 'Aoede' }
+                        }
+                    }
+                }
             })
         });
-        if (!r.ok) throw new Error(`Gemini TTS ${r.status}`);
+        if (!r.ok) {
+            const errBody = await r.text().catch(() => '');
+            throw new Error(`Gemini TTS ${r.status}: ${errBody.substring(0, 100)}`);
+        }
         const json = await r.json();
-        const audioContent = json.audioContent;
-        if (!audioContent) throw new Error('Gemini TTS yanıtında ses verisi yok');
-        const binaryStr = atob(audioContent);
+        const part = json?.candidates?.[0]?.content?.parts?.[0];
+        if (!part?.inlineData?.data) throw new Error('Gemini TTS yanıtında ses verisi yok');
+        const binaryStr = atob(part.inlineData.data);
         const bytes = new Uint8Array(binaryStr.length);
         for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-        addSystemLog(`Gemini TTS: ${(bytes.length / 1024).toFixed(0)}KB`, 'success');
-        return { wavBuffer: bytes.buffer, sampleRate: SAMPLE_RATE };
+        if (bytes.length < MIN_TTS_BYTES) throw new Error('Gemini TTS çok küçük yanıt');
+        // Gemini TTS raw PCM döndürür (24kHz, 16-bit, mono)
+        const headerStr = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]);
+        let sampleRate = SAMPLE_RATE;
+        let wavBuffer;
+        if (headerStr === 'RIFF') {
+            wavBuffer = bytes.buffer;
+            const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+            sampleRate = view.getUint32(24, true);
+            addSystemLog(`Gemini TTS(WAV): ${(bytes.length/1024).toFixed(0)}KB sr=${sampleRate}`, 'success');
+        } else {
+            wavBuffer = MediaSynthesisService._makeWav(bytes, sampleRate);
+            addSystemLog(`Gemini TTS(raw): ${(bytes.length/1024).toFixed(0)}KB`, 'success');
+        }
+        wavBuffer = MediaSynthesisService._normalizeWavVolume(wavBuffer);
+        return { wavBuffer, sampleRate };
     }
 
 
@@ -5229,7 +5261,7 @@ export default function App() {
                     <h1 className="text-xl md:text-3xl font-black tracking-tight text-white whitespace-nowrap">OTONOM</h1>
                     <div className="bg-indigo-900/40 border-2 border-indigo-500/50 px-3 py-1.5 rounded-full shadow-[0_0_20px_rgba(99,102,241,0.3)]">
                     <p className="text-indigo-300 text-[10px] md:text-xs font-black tracking-widest uppercase">
-                             Otonom v4.12 <span className="mx-1 text-white">•</span> One-Page
+                             Otonom v4.13 <span className="mx-1 text-white">•</span> One-Page
                          </p>
                     </div>
                 </div>
