@@ -2224,7 +2224,12 @@ class MediaSynthesisService {
         if (!text || voice === 'none') return null;
         let cleanText = text.replace(/[*_#"']/g, '').replace(/\.\.\./g, ', ').replace(/\n/g, ' ').replace(/[:;/\\|{}[\]<>^~`]/g, ', ').replace(/\s+/g, ' ').trim();
         if (cleanText.length < 2) return null;
-        // Önce Mimo TTS dene
+        // Önce Gemini TTS dene (Google Cloud Text-to-Speech)
+        try {
+            const audioData = await MediaSynthesisService._generateGeminiTTS(cleanText);
+            if (audioData) return audioData;
+        } catch (e) { addSystemLog(`Gemini TTS hatası: ${e.message}`, 'warn'); }
+        // Sonra Mimo TTS dene
         try {
             const audioData = await MediaSynthesisService._generateMimoTTS(cleanText);
             if (audioData) return audioData;
@@ -2237,11 +2242,34 @@ class MediaSynthesisService {
         return MediaSynthesisService._generateToneAudio(cleanText);
     }
 
+    static async _generateGeminiTTS(text) {
+        const url = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${getApiKey()}`;
+        const r = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                input: { text },
+                voice: { languageCode: 'tr-TR', name: 'tr-TR-Standard-A', ssmlGender: 'MALE' },
+                audioConfig: { audioEncoding: 'LINEAR16', speakingRate: 1.0, pitch: 0 }
+            })
+        });
+        if (!r.ok) throw new Error(`Gemini TTS ${r.status}`);
+        const json = await r.json();
+        const audioContent = json.audioContent;
+        if (!audioContent) throw new Error('Gemini TTS yanıtında ses verisi yok');
+        const binaryStr = atob(audioContent);
+        const bytes = new Uint8Array(binaryStr.length);
+        for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+        addSystemLog(`Gemini TTS: ${(bytes.length / 1024).toFixed(0)}KB`, 'success');
+        return { wavBuffer: bytes.buffer, sampleRate: 24000 };
+    }
+
     static async _generateMimoTTS(text) {
         const payload = {
             model: 'mimo-v2.5-tts',
             messages: [
-                { role: 'user', content: text }
+                { role: 'user', content: text },
+                { role: 'assistant', content: '' }
             ]
         };
         const r = await fetch(`${getMimoUrl()}/chat/completions`, {
