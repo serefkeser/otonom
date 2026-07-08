@@ -1,5 +1,5 @@
 // ============================================================================
-// OTONOM — v4.14 (v4.13 düzeltmesi: Gemini Live API TTS, @google/generative-ai paketi ile WebSocket tabanlı ses)
+// OTONOM — v4.15 (v4.14 düzeltmesi: Gemini 2.5 Flash Preview TTS, yüksek kaliteli Türkçe seslendirme)
 // Gemini AI Studio Canvas Uyumlu Versiyon
 // ============================================================================
 // Akış: S1 → M1 analiz → 2 AI görsel → S2 → M2 analiz → 2 AI görsel → ...
@@ -2254,41 +2254,34 @@ class MediaSynthesisService {
 
     // Gemini API native TTS (responseModalities: AUDIO)
     // Desteklenen: gemini-2.0-flash, gemini-2.5-flash-preview
-    // Gemini Live API ile TTS (WebSocket tabanlı, yüksek kalite Türkçe)
+    // Gemini TTS API (gemini-2.5-flash-preview-tts)
     static async _generateGeminiTTS(text) {
         const apiKey = getApiKey();
         if (!apiKey) throw new Error('Gemini API key yok');
-        const { GoogleGenerativeAI } = await import('@google/generative-ai');
-        const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-live-001' });
-        const response = await model.generateContent({
-            contents: [{ role: 'user', parts: [{ text: `Aşağıdaki metni Türkçe olarak doğal ve akıcı bir şekilde seslendir. Sadece sesi döndür, başka bir şey söyleme:\n\n${text}` }] }],
-            generationConfig: {
-                responseModalities: ['AUDIO'],
-                speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Aoede' } } }
-            }
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`;
+        const r = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{ parts: [{ text }] }],
+                generationConfig: {
+                    responseModalities: ['AUDIO'],
+                    speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Aoede' } } }
+                }
+            })
         });
-        const part = response?.response?.candidates?.[0]?.content?.parts?.[0];
+        if (!r.ok) throw new Error(`Gemini TTS ${r.status}`);
+        const json = await r.json();
+        const part = json?.candidates?.[0]?.content?.parts?.[0];
         if (!part?.inlineData?.data) throw new Error('Gemini TTS yanıtında ses verisi yok');
-        const b64 = part.inlineData.data;
-        const binaryStr = atob(b64);
+        const binaryStr = atob(part.inlineData.data);
         const bytes = new Uint8Array(binaryStr.length);
         for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
         if (bytes.length < MIN_TTS_BYTES) throw new Error('Gemini TTS çok küçük yanıt');
-        const headerStr = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]);
-        let sampleRate = SAMPLE_RATE;
-        let wavBuffer;
-        if (headerStr === 'RIFF') {
-            wavBuffer = bytes.buffer;
-            const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-            sampleRate = view.getUint32(24, true);
-            addSystemLog(`Gemini TTS(WAV): ${(bytes.length/1024).toFixed(0)}KB sr=${sampleRate}`, 'success');
-        } else {
-            wavBuffer = MediaSynthesisService._makeWav(bytes, sampleRate);
-            addSystemLog(`Gemini TTS(raw): ${(bytes.length/1024).toFixed(0)}KB`, 'success');
-        }
-        wavBuffer = MediaSynthesisService._normalizeWavVolume(wavBuffer);
-        return { wavBuffer, sampleRate };
+        // Gemini TTS raw PCM döndürür (24kHz, 16-bit, mono)
+        const wavBuffer = MediaSynthesisService._makeWav(bytes, SAMPLE_RATE);
+        addSystemLog(`Gemini TTS: ${(bytes.length/1024).toFixed(0)}KB`, 'success');
+        return { wavBuffer, sampleRate: SAMPLE_RATE };
     }
 
 
@@ -5251,7 +5244,7 @@ export default function App() {
                     <h1 className="text-xl md:text-3xl font-black tracking-tight text-white whitespace-nowrap">OTONOM</h1>
                     <div className="bg-indigo-900/40 border-2 border-indigo-500/50 px-3 py-1.5 rounded-full shadow-[0_0_20px_rgba(99,102,241,0.3)]">
                     <p className="text-indigo-300 text-[10px] md:text-xs font-black tracking-widest uppercase">
-                             Otonom v4.14 <span className="mx-1 text-white">•</span> One-Page
+                             Otonom v4.15 <span className="mx-1 text-white">•</span> One-Page
                          </p>
                     </div>
                 </div>
