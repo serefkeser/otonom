@@ -880,6 +880,14 @@ class LogicEngineService {
             const rawText = data.candidates[0].content.parts[0].text;
             console.log('[ANALYZE RAW] first 500:', rawText.substring(0, 500));
             const parsedData = extractJSON(rawText, 'analyzeContent');
+            if (!parsedData.videoSlides && parsedData.scenes) {
+                parsedData.videoSlides = parsedData.scenes.map(s => ({
+                    topText: s.topText || s.sceneNumber?.toString() || "",
+                    spokenText: s.spokenText || "",
+                    imagePrompts: s.imagePrompts || [s.imagePrompt || ""]
+                }));
+                delete parsedData.scenes;
+            }
             console.log('[ANALYZE PARSED] keys:', Object.keys(parsedData), 'slides:', parsedData.videoSlides?.length);
             if (parsedData.isContentUnreadable) throw new Error("Orijinal metne ulaşılamadı.");
             // spokenText'teki hata mesajlarını filtrele
@@ -928,7 +936,7 @@ class LogicEngineService {
         const isLastImage = imageIndex === totalImages - 1;
         const sonSozRule = isLastImage ? `\n\nYEDİNCİ KURAL (SON SÖZ): Konuya cuk diye oturan çok vurucu bir ATASÖZÜ veya ÖZLÜ SÖZ belirle. Bunu 'sonSoz' alanına kaydet.` : "";
 
-        const sysPrompt = `Bu, ${totalImages} görsellik bir videonun ${imageIndex + 1}. bloğudur.\nSen TikTok ve Instagram Reels için viral içerikler üreten profesyonel bir içerik üreticisisin.\n\nSENARYOYU TAM OLARAK 2 SAHNE olacak şekilde böl! Görseldeki haberi/konuyu 2 farklı açıdan anlat.\nHer sahne bu görsele ait haberi anlatmalı.\nToplam konuşma metni bu blok için 30-50 kelime aralığında olmalıdır.\n\nDİL KURALI: ${langInstruction}\n${styleInstruction}\n${dynamicRules}\n${contextBlock}\n\nKAPAK DİLİ: 'thumbnailText' ${config.language} dilinde olmalıdır. Clickbait başlık olmalıdır.\nYOUTUBE: 'youtubeTitle' ve 'youtubeDescription' alanlarını ${config.language} dilinde oluştur. YouTube SEO kurallarına uygun, dikkat çekici başlık ve açıklayıcı açıklama yaz. 'youtubeHashtags' dizisine 5-8 adet ilgili hashtag ekle.\nGRAFİKLER: İstatistik yoksa 'chartData.show' false yap.\nGÖRSEL UYUMU: 'imagePrompts' alanına yazacağın İngilizce komutlar, spokenText'teki ana görsel unsurları birebir tanımlamalıdır.\nATATÜRK HASSASİYETİ: 'Atatürk' geçerse 'imagePrompts' kısmına "Mustafa Kemal Atatürk, highly detailed, respectful portrait" ekle!${sonSozRule}\n\nDönüş ZORUNLU olarak JSON formatında olmalı.`;
+        const sysPrompt = `Bu, ${totalImages} görsellik bir videonun ${imageIndex + 1}. bloğudur.\nSen TikTok ve Instagram Reels için viral içerikler üreten profesyonel bir içerik üreticisisin.\n\nSENARYOYU TAM OLARAK 2 SAHNE olacak şekilde böl! Görseldeki haberi/konuyu 2 farklı açıdan anlat.\nHer sahne bu görsele ait haberi anlatmalı.\nToplam konuşma metni bu blok için 30-50 kelime aralığında olmalıdır.\n\nDİL KURALI: ${langInstruction}\n${styleInstruction}\n${dynamicRules}\n${contextBlock}\n\nKAPAK DİLİ: 'thumbnailText' ${config.language} dilinde olmalıdır. Clickbait başlık olmalıdır.\nYOUTUBE: 'youtubeTitle' ve 'youtubeDescription' alanlarını ${config.language} dilinde oluştur. YouTube SEO kurallarına uygun, dikkat çekici başlık ve açıklayıcı açıklama yaz. 'youtubeHashtags' dizisine 5-8 adet ilgili hashtag ekle.\nGRAFİKLER: İstatistik yoksa 'chartData.show' false yap.\nGÖRSEL UYUMU: 'imagePrompts' alanına yazacağın İngilizce komutlar, spokenText'teki ana görsel unsurları birebir tanımlamalıdır.\nATATÜRK HASSASİYETİ: 'Atatürk' geçerse 'imagePrompts' kısmına "Mustafa Kemal Atatürk, highly detailed, respectful portrait" ekle!${sonSozRule}\n\nDönüş ZORUNLU olarak JSON formatında olmalı:\n{\n  "isContentUnreadable": false,\n  "videoSlides": [\n    {"topText": "Kısa başlık", "spokenText": "Seslendirme metni", "imagePrompts": ["İngilizce görsel prompt"]}\n  ],\n  "thumbnailText": "string",\n  "sonSoz": "string",\n  "lastQuote": "string",\n  "thumbnailImagePrompt": "string",\n  "youtubeTitle": "string",\n  "youtubeDescription": "string",\n  "youtubeHashtags": ["hashtag1", "hashtag2"],\n  "mediaBlackout": {"show": false, "percentageCovered": 0, "percentageIgnored": 0, "mediaNames": [], "explanation": ""}\n}`;
 
         let parts = [];
 
@@ -984,6 +992,15 @@ class LogicEngineService {
             console.log('[DEBUG] rawPartText type:', typeof rawPartText, 'value:', typeof rawPartText === 'string' ? rawPartText.substring(0, 200) : (JSON.stringify(rawPartText) || '').substring(0, 200));
             const safeText = typeof rawPartText === 'string' ? rawPartText : JSON.stringify(rawPartText);
             const parsedData = extractJSON(safeText, `Görsel ${imageIndex + 1}`);
+            // Mimo bazen scenes olarak döndürür → videoSlides'a normalize et
+            if (!parsedData.videoSlides && parsedData.scenes) {
+                parsedData.videoSlides = parsedData.scenes.map(s => ({
+                    topText: s.topText || s.sceneNumber?.toString() || "",
+                    spokenText: s.spokenText || "",
+                    imagePrompts: s.imagePrompts || [s.imagePrompt || ""]
+                }));
+                delete parsedData.scenes;
+            }
             if (parsedData.isContentUnreadable) throw new Error("Orijinal metne ulaşılamadı.");
             // spokenText'teki hata mesajlarını filtrele
             if (parsedData.videoSlides) {
