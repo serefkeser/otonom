@@ -2224,16 +2224,16 @@ class MediaSynthesisService {
         if (!text || voice === 'none') return null;
         let cleanText = text.replace(/[*_#"']/g, '').replace(/\.\.\./g, ', ').replace(/\n/g, ' ').replace(/[:;/\\|{}[\]<>^~`]/g, ', ').replace(/\s+/g, ' ').trim();
         if (cleanText.length < 2) return null;
-        // Önce Mimo TTS dene
-        try {
-            const audioData = await MediaSynthesisService._generateMimoTTS(cleanText);
-            if (audioData) return audioData;
-        } catch (e) { addSystemLog(`Mimo TTS hatası: ${e.message}`, 'warn'); }
-        // Sonra Google Translate TTS (ücretsiz, Türkçe ses kaliteli)
+        // Önce Google Translate TTS (ücretsiz, Türkçe ses kaliteli)
         try {
             const audioData = await MediaSynthesisService._generateGoogleTTS(cleanText);
             if (audioData) return audioData;
         } catch (e) { addSystemLog(`Google TTS hatası: ${e.message}`, 'warn'); }
+        // Sonra Mimo TTS dene
+        try {
+            const audioData = await MediaSynthesisService._generateMimoTTS(cleanText);
+            if (audioData) return audioData;
+        } catch (e) { addSystemLog(`Mimo TTS hatası: ${e.message}`, 'warn'); }
         // SpeechSynthesis dene
         try {
             return await MediaSynthesisService._generateSpeechSynth(cleanText);
@@ -2266,7 +2266,7 @@ class MediaSynthesisService {
 
     static async _generateGoogleTTS(text) {
         const q = encodeURIComponent(text);
-        const r = await fetch(`https://translate.google.com/translate_tts?ie=UTF-8&q=${q}&tl=tr&client=tw-ob`, {
+        const r = await fetch(`/tts?ie=UTF-8&q=${q}&tl=tr&client=tw-ob`, {
             signal: AbortSignal.timeout(15000)
         });
         if (!r.ok) throw new Error(`Google TTS ${r.status}`);
