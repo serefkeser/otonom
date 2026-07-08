@@ -2224,12 +2224,7 @@ class MediaSynthesisService {
         if (!text || voice === 'none') return null;
         let cleanText = text.replace(/[*_#"']/g, '').replace(/\.\.\./g, ', ').replace(/\n/g, ' ').replace(/[:;/\\|{}[\]<>^~`]/g, ', ').replace(/\s+/g, ' ').trim();
         if (cleanText.length < 2) return null;
-        // Önce Google Translate TTS (ücretsiz, Türkçe ses kaliteli)
-        try {
-            const audioData = await MediaSynthesisService._generateGoogleTTS(cleanText);
-            if (audioData) return audioData;
-        } catch (e) { addSystemLog(`StreamElements hatası: ${e.message}`, 'warn'); }
-        // Sonra Mimo TTS dene
+        // Önce Mimo TTS dene (ses normalize edilir)
         try {
             const audioData = await MediaSynthesisService._generateMimoTTS(cleanText);
             if (audioData) return audioData;
@@ -2264,29 +2259,7 @@ class MediaSynthesisService {
         return { wavBuffer: bytes.buffer, sampleRate: 24000 };
     }
 
-    static async _generateGoogleTTS(text) {
-        const q = encodeURIComponent(text.substring(0, 200));
-        const r = await fetch(`https://api.streamelements.com/kappa/v2/tts?voice=Turkish%20Female&text=${q}`, {
-            signal: AbortSignal.timeout(15000)
-        });
-        if (!r.ok) throw new Error(`StreamElements ${r.status}`);
-        const blob = await r.blob();
-        const arrayBuffer = await blob.arrayBuffer();
-        const bytes = new Uint8Array(arrayBuffer);
-        if (bytes.length < 1000) throw new Error('StreamElements çok küçük yanıt');
-        const headerStr = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]);
-        const sampleRate = 24000;
-        let wavBuffer;
-        if (headerStr === 'RIFF') {
-            wavBuffer = arrayBuffer;
-        } else if (blob.type === 'audio/mpeg' || bytes[0] === 0xFF) {
-            wavBuffer = arrayBuffer;
-        } else {
-            wavBuffer = MediaSynthesisService._makeWav(bytes, sampleRate);
-        }
-        addSystemLog(`StreamElements: ${(bytes.length / 1024).toFixed(0)}KB`, 'success');
-        return { wavBuffer, sampleRate };
-    }
+
 
     static async _generateMimoTTS(text) {
         const payload = {
@@ -2319,6 +2292,7 @@ class MediaSynthesisService {
             wavBuffer = MediaSynthesisService._makeWav(bytes, sampleRate);
         }
         addSystemLog(`Mimo TTS: ${(bytes.length / 1024).toFixed(0)}KB`, 'success');
+        wavBuffer = MediaSynthesisService._normalizeWavVolume(wavBuffer);
         return { wavBuffer, sampleRate };
     }
 
@@ -2393,6 +2367,28 @@ class MediaSynthesisService {
         view.setUint16(34, bitsPerSample, true); ws(36, 'data');
         view.setUint32(40, pcmBytes.length, true);
         new Uint8Array(wavBuffer, 44).set(pcmBytes);
+        return wavBuffer;
+    }
+
+    static _normalizeWavVolume(wavBuffer) {
+        try {
+            const view = new DataView(wavBuffer);
+            const dataSize = view.getUint32(40, true);
+            const sampleCount = dataSize / 2;
+            let peak = 0;
+            for (let i = 0; i < sampleCount; i++) {
+                const sample = view.getInt16(44 + i * 2, true);
+                const abs = Math.abs(sample);
+                if (abs > peak) peak = abs;
+            }
+            if (peak < 100 || peak > 32000) return wavBuffer;
+            const gain = 30000 / peak;
+            for (let i = 0; i < sampleCount; i++) {
+                const sample = view.getInt16(44 + i * 2, true);
+                const normalized = Math.max(-32768, Math.min(32767, Math.round(sample * gain)));
+                view.setInt16(44 + i * 2, normalized, true);
+            }
+        } catch (e) { /* silent */ }
         return wavBuffer;
     }
 }
