@@ -30,6 +30,51 @@ function getMimoUrl() {
     return envUrl || localStorage.getItem('ns_mimo_base_url') || MIMO_BASE_URL;
 }
 
+async function mimoOcr(imageB64, prompt, mimeType = 'image/jpeg', options = {}) {
+    const { model = 'mimo-v2.5', maxTokens = 2048, temperature = 0.0 } = options;
+    const b64 = imageB64.includes(',') ? imageB64.split(',')[1] : imageB64;
+    const imgUrl = await compressImageB64(b64, mimeType, 1024, 0.8);
+    const r = await fetch(`${getMimoUrl()}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getMimoKey()}` },
+        body: JSON.stringify({
+            model,
+            messages: [
+                { role: 'system', content: 'Görseldeki yazıyı oku. Sadece metni yaz, yorum ekleme.' },
+                { role: 'user', content: [{ type: 'image_url', image_url: { url: imgUrl } }, { type: 'text', text: prompt }] }
+            ],
+            max_tokens: maxTokens,
+            temperature
+        })
+    });
+    if (!r.ok) throw new Error(`Mimo OCR hatası: ${r.status}`);
+    const data = await r.json();
+    let rawContent = data.choices?.[0]?.message?.content;
+    let text = typeof rawContent === 'object' && rawContent !== null ? JSON.stringify(rawContent) : (rawContent || '');
+    return text.trim();
+}
+
+async function mimoText(prompt, options = {}) {
+    const { model = 'mimo-v2.5-pro', maxTokens = 4096, temperature = 0.0, responseFormat } = options;
+    const payload = {
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: maxTokens,
+        temperature
+    };
+    if (responseFormat) payload.response_format = { type: 'json_object' };
+    const r = await fetch(`${getMimoUrl()}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getMimoKey()}` },
+        body: JSON.stringify(payload)
+    });
+    if (!r.ok) throw new Error(`Mimo text hatası: ${r.status}`);
+    const data = await r.json();
+    let rawContent = data.choices?.[0]?.message?.content;
+    let text = typeof rawContent === 'object' && rawContent !== null ? JSON.stringify(rawContent) : (rawContent || '');
+    return text.trim();
+}
+
 function compressImageB64(b64, mime, maxDim = 1024, quality = 0.8) {
     return new Promise((resolve) => {
         const img = new Image();
@@ -1022,24 +1067,12 @@ class LogicEngineService {
                             img.src = 'data:image/jpeg;base64,' + srcB64;
                         });
                     };
-                    const ocrCall = async (imageB64, prompt, model) => {
-                        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${getApiKey()}`;
-                        const r = await NetworkUtils.fetchWithRetry(url, {
-                            method: 'POST',
-                            body: JSON.stringify({
-                                contents: [{ parts: [
-                                    { inlineData: { mimeType: imgType, data: imageB64 } },
-                                    { text: prompt }
-                                ] }],
-                                generationConfig: { temperature: 0.0, maxOutputTokens: 2048 }
-                            })
-                        });
-                        if (!r) return "";
-                        const data = await r.json();
-                        return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+                    const ocrCall = async (imageB64, prompt) => {
+                        try { return await mimoOcr(imageB64, prompt, imgType); }
+                        catch (e) { addSystemLog(`  Mimo OCR hatası: ${e.message}`, 'warn'); return ""; }
                     };
                     quoteText = "";
-                    const models = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-flash'];
+                    const models = ['mimo-v2.5'];
                     // Tekrar eden satırları kaldıran fonksiyon
                     const deduplicateLines = (text) => {
                         const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
@@ -1120,25 +1153,13 @@ class LogicEngineService {
                     });
                 };
 
-                const ocrCall = async (imageB64, prompt, model) => {
-                    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${getApiKey()}`;
-                    const r = await NetworkUtils.fetchWithRetry(url, {
-                        method: 'POST',
-                        body: JSON.stringify({
-                            contents: [{ parts: [
-                                { inlineData: { mimeType: imgType, data: imageB64 } },
-                                { text: prompt }
-                            ] }],
-                            generationConfig: { temperature: 0.0, maxOutputTokens: 2048 }
-                        })
-                    });
-                    if (!r) return "";
-                    const data = await r.json();
-                    return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+                const ocrCall = async (imageB64, prompt) => {
+                    try { return await mimoOcr(imageB64, prompt, imgType); }
+                    catch (e) { addSystemLog(`  Mimo OCR hatası: ${e.message}`, 'warn'); return ""; }
                 };
 
                 quoteText = "";
-                const models = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-flash'];
+                const models = ['mimo-v2.5'];
                 // Tekrar eden satırları kaldıran fonksiyon
                 const dedupLines = (text) => {
                     const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
@@ -1391,22 +1412,14 @@ class LogicEngineService {
                 if (file.type?.startsWith('image')) {
                     try {
                         const b64 = file.data.split(',')[1];
-                        const ocrUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${getApiKey()}`;
-                        const ocrPayload = {
-                            contents: [{ parts: [
-                                { inlineData: { mimeType: file.type, data: b64 } },
-                                { text: `Bu görseldeki ana konuyu/başlığı tespit et. Sadece konuyu yaz, başka bir şey yazma. Örnek: "Türkiye ekonomisi" veya "Filistin'de son durum"` }
-                            ] }],
-                            generationConfig: { temperature: 0.1, maxOutputTokens: 100 }
-                        };
-                        const r = await NetworkUtils.fetchWithRetry(ocrUrl, { method: 'POST', body: JSON.stringify(ocrPayload) });
-                        if (r) {
-                            const d = await r.json();
-                            const topic = d.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+                        try {
+                            const topic = await mimoOcr(b64, 'Bu görseldeki ana konuyu/başlığı tespit et. Sadece konuyu yaz, başka bir şey yazma.', file.type, { model: 'mimo-v2.5', maxTokens: 100, temperature: 0.1 });
                             if (topic && topic.length > 3) {
                                 topics.push(topic);
                                 addSystemLog(`Görsel ${i + 1} konu: "${topic}"`, 'success');
                             }
+                        } catch (e) {
+                            addSystemLog(`Görsel ${i + 1} konu tespit hatası: ${e.message}`, 'warn');
                         }
                     } catch (e) {
                         addSystemLog(`Görsel ${i + 1} konu tespit hatası: ${e.message}`, 'warn');
@@ -1702,16 +1715,11 @@ JSON formatında dön.`;
             // URL'den içerik çek — sadece sayfa metnini oku, araştırma yapma
             try {
                 addSystemLog('URL\'den içerik çekiliyor...', 'info');
-const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${getApiKey()}`;
-                const payload = {
-                    contents: [{ parts: [{ text: `Bu URL\'deki sayfadaki TÜM yazıyı olduğu gibi kopyala. Hiçbir değişiklik yapma, ekleme çıkarma yapma, özetleme yapma. Sadece sayfadaki yazıyı aynen aktar.\n\nURL: ${inputData}` }] }],
-                    generationConfig: { temperature: 0.0, maxOutputTokens: 8192 }
-                };
-                const r = await NetworkUtils.fetchWithRetry(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                if (r && r.ok) {
-                    const d = await r.json();
-                    rawText = d.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
-                    addSystemLog(`URL\'den ${rawText.length} karakter okundu.`, 'success');
+                try {
+                    rawText = await mimoText(`Bu URL'deki sayfadaki TÜM yazıyı olduğu gibi kopyala. Hiçbir değişiklik yapma, ekleme çıkarma yapma, özetleme yapma. Sadece sayfadaki yazıyı aynen aktar.\n\nURL: ${inputData}`, { maxTokens: 8192 });
+                    addSystemLog(`URL'den ${rawText.length} karakter okundu.`, 'success');
+                } catch (e) {
+                    addSystemLog(`URL içerik çekme hatası: ${e.message}`, 'warn');
                 }
             } catch (e) {
                 addSystemLog('URL içerik çekme hatası: ' + e.message, 'warn');
@@ -1730,26 +1738,17 @@ const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-
                         try {
                             addSystemLog(`Görsel ${i + 1}/${inputData.length} OCR yapılıyor...`, 'info');
                             const b64 = file.data.split(',')[1];
-                            const ocrUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${getApiKey()}`;
-                            const ocrPayload = {
-                                contents: [{ parts: [
-                                    { inlineData: { mimeType: file.type, data: b64 } },
-                                    { text: 'Bu görseldeki TÜM yazıyı olduğu gibi, kelimesi kelimesine yaz. Hiçbir değişiklik yapma, ekleme çıkarma yapma, yorum yapma. Sadece görseldeki yazıyı aynen aktar. Eğer görselde kesinlikle yazı yoksa sadece "YOK" yaz.' }
-                                ] }],
-                                generationConfig: { temperature: 0.0, maxOutputTokens: 4096 }
-                            };
-                            const r = await NetworkUtils.fetchWithRetry(ocrUrl, { method: 'POST', body: JSON.stringify(ocrPayload) });
-                            if (r && r.ok) {
-                                const d = await r.json();
-                                const text = d.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+                            try {
+                                const text = await mimoOcr(b64, 'Bu görseldeki TÜM yazıyı olduğu gibi, kelimesi kelimesine yaz. Hiçbir değişiklik yapma, ekleme çıkarma yapma, yorum yapma. Sadece görseldeki yazıyı aynen aktar. Eğer görselde kesinlikle yazı yoksa sadece "YOK" yaz.', file.type, { maxTokens: 4096 });
                                 if (text && text !== 'YOK' && text.length > 3 && !text.toLowerCase().includes('görselde yazı yok')) {
                                     allTexts.push(text);
                                     addSystemLog(`Görsel ${i + 1}: ${text.length} karakter okundu.`, 'success');
                                 } else {
-                                    // Yazısız görsel — video içinde kullanılacak
                                     textlessImages.push(file.data);
                                     addSystemLog(`Görsel ${i + 1}: Yazı bulunamadı, yazısız görsel olarak kaydedildi.`, 'info');
                                 }
+                            } catch (e) {
+                                addSystemLog(`Görsel ${i + 1} OCR hatası: ${e.message}`, 'warn');
                             }
                         } catch (e) {
                             addSystemLog(`Görsel ${i + 1} OCR hatası: ${e.message}`, 'warn');
@@ -1758,22 +1757,14 @@ const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-
                         try {
                             addSystemLog(`Video ${i + 1}/${inputData.length} OCR yapılıyor...`, 'info');
                             const b64 = file.data.split(',')[1];
-                            const ocrUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${getApiKey()}`;
-                            const ocrPayload = {
-                                contents: [{ parts: [
-                                    { inlineData: { mimeType: file.type, data: b64 } },
-                                    { text: 'Bu videodaki konuşmayı/seslendirmeyi olduğu gibi yazıya dök. Kelimesi kelimesine yaz. Hiçbir değişiklik yapma, ekleme çıkarma yapma. Sadece duyulan sesi aynen yazıya dök.' }
-                                ] }],
-                                generationConfig: { temperature: 0.0, maxOutputTokens: 8192 }
-                            };
-                            const r = await NetworkUtils.fetchWithRetry(ocrUrl, { method: 'POST', body: JSON.stringify(ocrPayload) });
-                            if (r && r.ok) {
-                                const d = await r.json();
-                                const text = d.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+                            try {
+                                const text = await mimoOcr(b64, 'Bu videodaki konuşmayı/seslendirmeyi olduğu gibi yazıya dök. Kelimesi kelimesine yaz. Hiçbir değişiklik yapma, ekleme çıkarma yapma. Sadece duyulan sesi aynen yazıya dök.', file.type, { maxTokens: 8192 });
                                 if (text && text.length > 3) {
                                     allTexts.push(text);
                                     addSystemLog(`Video ${i + 1}: ${text.length} karakter okundu.`, 'success');
                                 }
+                            } catch (e) {
+                                addSystemLog(`Video ${i + 1} OCR hatası: ${e.message}`, 'warn');
                             }
                         } catch (e) {
                             addSystemLog(`Video ${i + 1} OCR hatası: ${e.message}`, 'warn');
@@ -4739,19 +4730,10 @@ export default function App() {
     const extractHeadlinesFromImage = async (imageData, gazeteName) => {
         addSystemLog('Gazete görselinden başlıklar çıkarılıyor...', 'info');
         const b64 = imageData.includes(',') ? imageData.split(',')[1] : imageData;
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${getApiKey()}`;
         const prompt = `Bu bir gazete manşet görselidir. Görseldeki TÜM manşet başlıklarını çıkar.\n\nKurallar:\n- Her başlığı ayrı bir satırda yaz\n- Sadece ana manşet ve alt başlıkları çıkar, reklam veya köşe yazısı başlıklarını dahil etme\n- Başlıkları orijinal haliyle yaz, değiştirme\n- Her başlık tek bir cümle olsun\n\nJSON formatında dön: { "headlines": ["başlık1", "başlık2", ...] }`;
         try {
-            const r = await NetworkUtils.fetchWithRetry(url, {
-                method: 'POST',
-                body: JSON.stringify({
-                    contents: [{ parts: [{ inlineData: { mimeType: 'image/jpeg', data: b64 } }, { text: prompt }] }],
-                    generationConfig: { responseMimeType: "application/json", responseSchema: { type: "OBJECT", properties: { headlines: { type: "ARRAY", items: { type: "STRING" } } }, required: ["headlines"] } }
-                })
-            });
-            if (!r) throw new Error('API yanıt döndürmedi');
-            const data = await r.json();
-            const parsed = extractJSON(data.candidates?.[0]?.content?.parts?.[0]?.text || '', 'GazeteOCR');
+            const result = await mimoOcr(b64, prompt, 'image/jpeg', { maxTokens: 2048, temperature: 0.1 });
+            const parsed = extractJSON(result, 'GazeteOCR');
             const headlines = (parsed.headlines || []).filter(h => h && h.length > 5);
             addSystemLog(`${headlines.length} başlık çıkarıldı.`, 'success');
             return headlines;
