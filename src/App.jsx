@@ -2085,6 +2085,40 @@ class MediaSynthesisService {
         ctx.lineWidth = 2;
         ctx.strokeRect(4, 4, W - 8, H - 8);
 
+        // 9. Text overlay — prompt metnini ekrana yaz
+        if (prompt && prompt.length > 3) {
+            const textWords = prompt.replace(/[^\wçğıöşüÇĞIİÖŞÜa-zA-Z ]/g, ' ').split(/\s+/).filter(Boolean).slice(0, 30);
+            const maxWidth = W * 0.82;
+            let fontSize = Math.max(24, Math.min(64, Math.floor(540 / Math.sqrt(textWords.length + 1))));
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            let lines = [], line = '';
+            while (fontSize > 16 && lines.length < 1) {
+                lines = []; line = '';
+                ctx.font = `600 ${fontSize}px "Segoe UI", Arial, sans-serif`;
+                for (const word of textWords) {
+                    const testLine = line ? line + ' ' + word : word;
+                    if (ctx.measureText(testLine).width > maxWidth) {
+                        lines.push(line); line = word;
+                    } else { line = testLine; }
+                }
+                lines.push(line);
+                if (lines.length > 6) { fontSize -= 4; lines = []; }
+                else break;
+            }
+            const lineHeight = fontSize * 1.3;
+            const startY = (H - (lines.length - 1) * lineHeight) / 2;
+            lines.forEach((l, i) => {
+                const y = startY + i * lineHeight;
+                ctx.shadowColor = 'rgba(0,0,0,0.8)';
+                ctx.shadowBlur = 20;
+                ctx.fillStyle = '#ffffff';
+                ctx.font = `600 ${fontSize}px "Segoe UI", Arial, sans-serif`;
+                ctx.fillText(l, W / 2, y);
+                ctx.shadowBlur = 0;
+            });
+        }
+
         return canvas.toDataURL('image/jpeg', 0.88);
     }
 
@@ -2207,8 +2241,7 @@ class MediaSynthesisService {
         const payload = {
             model: 'mimo-v2.5-tts',
             messages: [
-                { role: 'user', content: text },
-                { role: 'assistant', content: '' }
+                { role: 'user', content: text }
             ]
         };
         const r = await fetch(`${getMimoUrl()}/chat/completions`, {
@@ -2224,9 +2257,17 @@ class MediaSynthesisService {
         const bytes = new Uint8Array(binaryStr.length);
         for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
         if (bytes.length < 100) throw new Error('Mimo TTS çok küçük yanıt');
+        // Mimo'nun döndürdüğü ses verisi — WAV header yoksa ekle
+        const headerStr = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]);
         const sampleRate = 24000;
+        let wavBuffer;
+        if (headerStr === 'RIFF') {
+            wavBuffer = bytes.buffer;
+        } else {
+            wavBuffer = MediaSynthesisService._makeWav(bytes, sampleRate);
+        }
         addSystemLog(`Mimo TTS: ${(bytes.length / 1024).toFixed(0)}KB`, 'success');
-        return { wavBuffer: bytes.buffer, sampleRate };
+        return { wavBuffer, sampleRate };
     }
 
     static _generateToneAudio(text) {
