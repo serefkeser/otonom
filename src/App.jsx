@@ -1,5 +1,5 @@
 // ============================================================================
-// OTONOM — v4.15 (v4.14 düzeltmesi: Gemini 2.5 Flash Preview TTS, yüksek kaliteli Türkçe seslendirme)
+// OTONOM — v4.16 (v4.15 düzeltmesi: Gemini TTS hata detayı loglandı, key sorunu düzeltildi)
 // Gemini AI Studio Canvas Uyumlu Versiyon
 // ============================================================================
 // Akış: S1 → M1 analiz → 2 AI görsel → S2 → M2 analiz → 2 AI görsel → ...
@@ -2270,7 +2270,11 @@ class MediaSynthesisService {
                 }
             })
         });
-        if (!r.ok) throw new Error(`Gemini TTS ${r.status}`);
+        if (!r.ok) {
+            const errBody = await r.text().catch(() => '');
+            addSystemLog(`Gemini TTS detay: ${errBody.substring(0, 150)}`, 'warn');
+            throw new Error(`Gemini TTS ${r.status}`);
+        }
         const json = await r.json();
         const part = json?.candidates?.[0]?.content?.parts?.[0];
         if (!part?.inlineData?.data) throw new Error('Gemini TTS yanıtında ses verisi yok');
@@ -5244,7 +5248,7 @@ export default function App() {
                     <h1 className="text-xl md:text-3xl font-black tracking-tight text-white whitespace-nowrap">OTONOM</h1>
                     <div className="bg-indigo-900/40 border-2 border-indigo-500/50 px-3 py-1.5 rounded-full shadow-[0_0_20px_rgba(99,102,241,0.3)]">
                     <p className="text-indigo-300 text-[10px] md:text-xs font-black tracking-widest uppercase">
-                             Otonom v4.15 <span className="mx-1 text-white">•</span> One-Page
+                             Otonom v4.16 <span className="mx-1 text-white">•</span> One-Page
                          </p>
                     </div>
                 </div>
