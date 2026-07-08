@@ -1,5 +1,5 @@
 // ============================================================================
-// OTONOM — v4.16 (v4.15 düzeltmesi: Gemini TTS hata detayı loglandı, key sorunu düzeltildi)
+// OTONOM — v4.17 (v4.16 düzeltmesi: 2x MP4 sorunu düzeltildi, EventBus cleanup eklendi)
 // Gemini AI Studio Canvas Uyumlu Versiyon
 // ============================================================================
 // Akış: S1 → M1 analiz → 2 AI görsel → S2 → M2 analiz → 2 AI görsel → ...
@@ -554,6 +554,7 @@ const _getAudioCtx = () => { if (!window._globalAudioCtx) window._globalAudioCtx
 class EventBus {
     constructor() { this.listeners = {}; }
     on(event, callback) { if (!this.listeners[event]) this.listeners[event] = []; this.listeners[event].push(callback); }
+    off(event, callback) { if (this.listeners[event]) this.listeners[event] = this.listeners[event].filter(cb => cb !== callback); }
     emit(event, data) { if (this.listeners[event]) this.listeners[event].forEach(cb => cb(data)); }
 }
 const sysEventBus = new EventBus();
@@ -4463,27 +4464,38 @@ export default function App() {
     useEffect(() => { let interval; if (uiState.isProcessing) { setElapsedSeconds(0); const start = performance.now(); interval = setInterval(() => { setElapsedSeconds(((performance.now() - start) / 1000).toFixed(1)); }, 100); } else clearInterval(interval); return () => clearInterval(interval); }, [uiState.isProcessing]);
 
     useEffect(() => {
-        sysEventBus.on('SYS_LOG_ADD', (log) => setSysLogs(prev => [...prev, log]));
-        sysEventBus.on('SYS_LOG_CLEAR', () => sysEventBus.emit('SYS_LOG_CLEAR_DONE'));
-        sysEventBus.on('SYS_LOG_CLEAR_DONE', () => setSysLogs([]));
-        sysEventBus.on('PROGRESS', (data) => { const p = Math.min(100, Math.max(0, Math.round(data.percent || 0))); setUiState(prev => ({ ...prev, percent: p, statusText: data.text || prev.statusText })); });
-        sysEventBus.on('WORKFLOW_STATE', (data) => {
+        const onSysLogAdd = (log) => setSysLogs(prev => [...prev, log]);
+        const onSysLogClear = () => sysEventBus.emit('SYS_LOG_CLEAR_DONE');
+        const onSysLogClearDone = () => setSysLogs([]);
+        const onProgress = (data) => { const p = Math.min(100, Math.max(0, Math.round(data.percent || 0))); setUiState(prev => ({ ...prev, percent: p, statusText: data.text || prev.statusText })); };
+        const onWorkflowState = (data) => {
             if (data.status === 'FAILED') setUiState(prev => ({ ...prev, isProcessing: false, error: data.job.error }));
             if (data.status === 'COMPLETED') {
                 setUiState(prev => ({ ...prev, isProcessing: false, percent: 100, statusText: 'Tamamlandı!', videoUrl: data.job.videoUrl }));
-                // Otomatik kaydet: İndirilenler klasörüne videoyu kaydet
                 autoSaveVideo(data.job.videoUrl, data.job.script?.thumbnailText || 'video', data.job.config?.videoFormat);
-                // Otomatik LinkedIn paylaşımı (compose URL ile)
                 const _autoLinkedInShare = async () => {
                     const title = data.job.script?.thumbnailText || data.job.script?.title || 'Yeni Haber';
                     addSystemLog('LinkedIn compose sayfası açılıyor...', 'info');
                     window.open(`https://www.linkedin.com/feed/compose/?text=${encodeURIComponent(title)}`, 'LinkedIn', 'width=700,height=700');
                 };
                 _autoLinkedInShare();
-                // Otomatik geçiş kaldırıldı — kullanıcı YouTube bilgilerini kopyaladıktan sonra "YENİ HABER" butonuna basar
             }
-        });
-        sysEventBus.on('AUTH_EXPIRED', () => setAuthExpired(true));
+        };
+        const onAuthExpired = () => setAuthExpired(true);
+        sysEventBus.on('SYS_LOG_ADD', onSysLogAdd);
+        sysEventBus.on('SYS_LOG_CLEAR', onSysLogClear);
+        sysEventBus.on('SYS_LOG_CLEAR_DONE', onSysLogClearDone);
+        sysEventBus.on('PROGRESS', onProgress);
+        sysEventBus.on('WORKFLOW_STATE', onWorkflowState);
+        sysEventBus.on('AUTH_EXPIRED', onAuthExpired);
+        return () => {
+            sysEventBus.off('SYS_LOG_ADD', onSysLogAdd);
+            sysEventBus.off('SYS_LOG_CLEAR', onSysLogClear);
+            sysEventBus.off('SYS_LOG_CLEAR_DONE', onSysLogClearDone);
+            sysEventBus.off('PROGRESS', onProgress);
+            sysEventBus.off('WORKFLOW_STATE', onWorkflowState);
+            sysEventBus.off('AUTH_EXPIRED', onAuthExpired);
+        };
     }, []);
 
     useEffect(() => { if (logEndRef.current) logEndRef.current.scrollIntoView({ behavior: 'smooth' }); }, [sysLogs]);
@@ -5249,7 +5261,7 @@ export default function App() {
                     <h1 className="text-xl md:text-3xl font-black tracking-tight text-white whitespace-nowrap">OTONOM</h1>
                     <div className="bg-indigo-900/40 border-2 border-indigo-500/50 px-3 py-1.5 rounded-full shadow-[0_0_20px_rgba(99,102,241,0.3)]">
                     <p className="text-indigo-300 text-[10px] md:text-xs font-black tracking-widest uppercase">
-                             Otonom v4.16 <span className="mx-1 text-white">•</span> One-Page
+                             Otonom v4.17 <span className="mx-1 text-white">•</span> One-Page
                          </p>
                     </div>
                 </div>
