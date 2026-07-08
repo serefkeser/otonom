@@ -2224,9 +2224,14 @@ class MediaSynthesisService {
         if (!text || voice === 'none') return null;
         let cleanText = text.replace(/[*_#"']/g, '').replace(/\.\.\./g, ', ').replace(/\n/g, ' ').replace(/[:;/\\|{}[\]<>^~`]/g, ', ').replace(/\s+/g, ' ').trim();
         if (cleanText.length < 2) return null;
-        // Önce Mimo TTS dene (ses normalize edilir)
+        // Önce Mimo v2.5 Pro (OpenAI audio formatı, yüksek kalite)
         try {
-            const audioData = await MediaSynthesisService._generateMimoTTS(cleanText);
+            const audioData = await MediaSynthesisService._generateMimoTTS(cleanText, 'mimo-v2.5-pro');
+            if (audioData) return audioData;
+        } catch (e) { addSystemLog(`Mimo Pro TTS hatası: ${e.message}`, 'warn'); }
+        // Fallback: Mimo TTS modeli
+        try {
+            const audioData = await MediaSynthesisService._generateMimoTTS(cleanText, 'mimo-v2.5-tts');
             if (audioData) return audioData;
         } catch (e) { addSystemLog(`Mimo TTS hatası: ${e.message}`, 'warn'); }
         // SpeechSynthesis dene
@@ -2261,9 +2266,14 @@ class MediaSynthesisService {
 
 
 
-    static async _generateMimoTTS(text) {
-        const payload = {
-            model: 'mimo-v2.5-tts',
+    static async _generateMimoTTS(text, modelName = 'mimo-v2.5-pro') {
+        const payload = modelName === 'mimo-v2.5-pro' ? {
+            model: modelName,
+            messages: [{ role: 'user', content: text }],
+            modalities: ['text', 'audio'],
+            audio: { voice: 'alloy', format: 'wav' }
+        } : {
+            model: modelName,
             messages: [
                 { role: 'user', content: text },
                 { role: 'assistant', content: '' }
