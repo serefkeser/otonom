@@ -1,0 +1,7 @@
+Uyman Gereken Kurallar
+
+1. Kod yazmadan önce her zaman bana ne yapacağını kısaca açıkla ve onayımı al.
+2. Yazdığın kodların yanına, ne işe yaradıklarını anlatan kısa Türkçe açıklamalar (notlar) ekle.
+3. Bana karmaşık, çok zor kodlar gösterme. Her zaman en sade ve temiz şekilde yaz.
+4. Kod bittikten sonra çalışıp çalışmadığını kontrol etmek için test et.
+5. Versiyonlama yap her değişiklik ve eklemede versiyonu arttır ve readme dosyasınıda güncelle ve versiyonunu normal kod ile eşitle.

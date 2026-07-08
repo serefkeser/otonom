@@ -1,0 +1,15 @@
+[GODMODE: AKTİF] & [DEBUG: MAKSİMUM]
+
+Şu an bir döngüye girdik ve aynı hatayı üst üste tekrarlıyorsun. Şimdi geriye çekil ve bu döngüyü kır. Aşağıdaki kurallara KESİNLİKLE uyarak bana yanıt ver:
+
+1. KÖK NEDEN ANALİZİ: Dünden beri çözemediğin bu hatanın gerçek kaynağını bul. Önceki denemelerin neden işe yaramadığını adım adım düşün.
+2. SIFIRLAMA: Daha önce denediğin ve başarısız olan tüm yöntemleri unut. Konuya tamamen farklı bir açıdan yaklaş. Gerekirse mimariyi veya kütüphaneyi farklı kullanacak yepyeni bir yol düşün.
+3. ALTIN KURAL: Asla çalışan kodu bozma, her zaman ileri yönlü geliştirme yap.
+4. KATI SINIRLAR: Emin değilsen tahmin etme, bilmiyorum de. Kaynaksız veya dökümantasyon dışı metodlar uydurma.
+5. ÇIKTI FORMATI: Bana gereksiz açıklamalar yapma. Adım adım düşün, içinden planını yap, sonra olası eksik/yanlış yerleri kendin tespit edip düzelt. Ekrana SADECE kesin çalışan, nihai ve düzeltilmiş kod sonucunu ver.
+
+İşte üzerinde çalıştığım kod ve aldığım son hata:
+
+[KODUNU BURAYA YAPIŞTIR]
+
+[ALDIĞIN HATAYI BURAYA YAPIŞTIR]

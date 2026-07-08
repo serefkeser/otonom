@@ -1,5 +1,5 @@
 // ============================================================================
-// OTONOM — v4.10 (v4.9 düzeltmesi: textlessImages scope + LinkedIn API kaldırıldı, compose URL ile paylaşım)
+// OTONOM — v4.11 (v4.10 düzeltmesi: TTS iyileştirmeleri, sihirli sayılar sabitlere taşındı, sessiz hatalar loglandı)
 // Gemini AI Studio Canvas Uyumlu Versiyon
 // ============================================================================
 // Akış: S1 → M1 analiz → 2 AI görsel → S2 → M2 analiz → 2 AI görsel → ...
@@ -15,10 +15,22 @@ import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, deleteDoc } 
 
 
 // ============================================================================
+// Sabitler (Constants)
+// ============================================================================
+const SAMPLE_RATE = 24000;
+const WAV_HEADER_SIZE = 44;
+const BGM_VOLUME = 0.3;
+const VOICEOVER_VOLUME = 0.8;
+const VIDEO_FPS = 30;
+const AUDIO_BITRATE = 192000;
+const VIDEO_BITRATE = 2000000;
+const MIN_TTS_BYTES = 100;
+
+// ============================================================================
 // Gemini API — Tek model, tüm AI işlemleri için
 // ============================================================================
 const MIMO_BASE_URL = 'https://token-plan-sgp.xiaomimimo.com/v1';
-const MIMO_API_KEY = 'tp-sb7y6c2s0bnowrp8y9imv5mfim3scjb8xrane8wt4hfrei6y';
+const MIMO_API_KEY = 'tp-sb7y6c2s0bnowrp8y9imv5mfim3scjb8xrane8wt4hfrei6y'; // GÜVENLİK: Üretimde .env dosyasına taşıyın
 
 function getMimoKey() {
     const envKey = typeof import.meta !== 'undefined' ? import.meta.env.VITE_MIMO_API_KEY : '';
@@ -33,7 +45,7 @@ function getMimoUrl() {
 async function mimoOcr(imageB64, prompt, mimeType = 'image/jpeg', options = {}) {
     const { model = 'mimo-v2.5', maxTokens = 2048, temperature = 0.0 } = options;
     const b64 = imageB64.includes(',') ? imageB64.split(',')[1] : imageB64;
-    const imgUrl = await compressImageB64(b64, mimeType, 1024, 0.8);
+    const imgUrl = await compressImageB64(b64, mimeType, 1024, 0.8); // maxDim=1024, quality=0.8
     const r = await fetch(`${getMimoUrl()}/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getMimoKey()}` },
@@ -2211,9 +2223,7 @@ class MediaSynthesisService {
     }
 
     static async generateImage(prompt, imageStyle = 'cinematic', resolution = '4K', isGuzelSoz = false, emotion = 'notr', quoteText = '') {
-        try {
-            addSystemLog(`Görsel çiziliyor: "${prompt?.substring(0, 40) || 'boş'}..."`, 'info');
-        } catch (e) {}
+        addSystemLog(`Görsel çiziliyor: "${(prompt || '').substring(0, 40)}..."`, 'info');
         if (isGuzelSoz && quoteText) {
             return this.generateQuoteFallback(quoteText, emotion);
         }
@@ -2261,7 +2271,7 @@ class MediaSynthesisService {
         const bytes = new Uint8Array(binaryStr.length);
         for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
         addSystemLog(`Gemini TTS: ${(bytes.length / 1024).toFixed(0)}KB`, 'success');
-        return { wavBuffer: bytes.buffer, sampleRate: 24000 };
+        return { wavBuffer: bytes.buffer, sampleRate: SAMPLE_RATE };
     }
 
 
@@ -2291,9 +2301,9 @@ class MediaSynthesisService {
         const binaryStr = atob(audioData);
         const bytes = new Uint8Array(binaryStr.length);
         for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-        if (bytes.length < 100) throw new Error('Mimo TTS çok küçük yanıt');
+        if (bytes.length < MIN_TTS_BYTES) throw new Error('Mimo TTS çok küçük yanıt');
         const headerStr = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]);
-        let sampleRate = 24000;
+        let sampleRate = SAMPLE_RATE;
         let wavBuffer;
         if (headerStr === 'RIFF') {
             wavBuffer = bytes.buffer;
@@ -2316,7 +2326,7 @@ class MediaSynthesisService {
     }
 
     static _generateToneAudio(text) {
-        const sampleRate = 24000;
+            const sampleRate = SAMPLE_RATE;
         const wordCount = text.split(/\s+/).length;
         const duration = Math.max(2, wordCount / 2.5);
         const numSamples = Math.floor(sampleRate * duration);
@@ -2343,7 +2353,7 @@ class MediaSynthesisService {
             // Ses tahmini süre
             const wordCount = text.split(/\s+/).length;
             const duration = Math.max(2, wordCount / 2.5);
-            const sampleRate = 24000;
+        const sampleRate = SAMPLE_RATE;
             // SpeechSynthesis ile oynat ve süreyi ölç
             const utterance = new SpeechSynthesisUtterance(text);
             utterance.lang = lang;
@@ -2376,7 +2386,7 @@ class MediaSynthesisService {
         const numChannels = 1; const bitsPerSample = 16;
         const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
         const blockAlign = numChannels * (bitsPerSample / 8);
-        const wavBuffer = new ArrayBuffer(44 + pcmBytes.length);
+        const wavBuffer = new ArrayBuffer(WAV_HEADER_SIZE + pcmBytes.length);
         const view = new DataView(wavBuffer);
         const ws = (offset, str) => { for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i)); };
         ws(0, 'RIFF'); view.setUint32(4, 36 + pcmBytes.length, true); ws(8, 'WAVE');
@@ -2385,7 +2395,7 @@ class MediaSynthesisService {
         view.setUint32(28, byteRate, true); view.setUint16(32, blockAlign, true);
         view.setUint16(34, bitsPerSample, true); ws(36, 'data');
         view.setUint32(40, pcmBytes.length, true);
-        new Uint8Array(wavBuffer, 44).set(pcmBytes);
+        new Uint8Array(wavBuffer, WAV_HEADER_SIZE).set(pcmBytes);
         return wavBuffer;
     }
 
@@ -2396,18 +2406,18 @@ class MediaSynthesisService {
             const sampleCount = dataSize / 2;
             let peak = 0;
             for (let i = 0; i < sampleCount; i++) {
-                const sample = view.getInt16(44 + i * 2, true);
+                const sample = view.getInt16(WAV_HEADER_SIZE + i * 2, true);
                 const abs = Math.abs(sample);
                 if (abs > peak) peak = abs;
             }
             if (peak < 100 || peak > 32000) return wavBuffer;
             const gain = 30000 / peak;
             for (let i = 0; i < sampleCount; i++) {
-                const sample = view.getInt16(44 + i * 2, true);
+                const sample = view.getInt16(WAV_HEADER_SIZE + i * 2, true);
                 const normalized = Math.max(-32768, Math.min(32767, Math.round(sample * gain)));
-                view.setInt16(44 + i * 2, normalized, true);
+                view.setInt16(WAV_HEADER_SIZE + i * 2, normalized, true);
             }
-        } catch (e) { /* silent */ }
+        } catch (e) { console.warn('[TTS] Volume normalization failed:', e.message); }
         return wavBuffer;
     }
 }
@@ -2692,8 +2702,8 @@ const RenderWorkerService = {
                     let byteLength = 0;
                     if (audioData.wavBuffer instanceof ArrayBuffer) byteLength = audioData.wavBuffer.byteLength;
                     else if (audioData.wavBuffer.buffer instanceof ArrayBuffer) byteLength = audioData.wavBuffer.buffer.byteLength;
-                    if (byteLength > 44) dur = (byteLength - 44) / (24000 * 2);
-                } catch (e) {}
+                    if (byteLength > WAV_HEADER_SIZE) dur = (byteLength - WAV_HEADER_SIZE) / (SAMPLE_RATE * 2);
+                } catch (e) { console.warn('[Audio] Duration calculation failed:', e.message); }
             } else if (text) {
                 dur = Math.max(2.0, text.split(/\s+/).filter(Boolean).length / 2.2);
             }
@@ -2716,7 +2726,7 @@ const RenderWorkerService = {
             if (ambientTypes.includes(ambientSound)) {
                 try {
                     const ambientObj = AmbientAudioService.getAmbientNode(audioCtx, ambientSound);
-                    if (ambientObj) { bgmSource = ambientObj.source; masterGain = audioCtx.createGain(); masterGain.gain.value = 0.3; ambientObj.gainNode.connect(masterGain); masterGain.connect(audioDest); addSystemLog('Atmosfer sesi: ' + ambientSound, 'success'); }
+                    if (ambientObj) { bgmSource = ambientObj.source; masterGain = audioCtx.createGain(); masterGain.gain.value = BGM_VOLUME; ambientObj.gainNode.connect(masterGain); masterGain.connect(audioDest); addSystemLog('Atmosfer sesi: ' + ambientSound, 'success'); }
                 } catch (e) { addSystemLog('Atmosfer sesi hatası: ' + e.message, 'warn'); }
             } else if (ambientSound.startsWith('local_')) {
                 try {
@@ -2725,7 +2735,7 @@ const RenderWorkerService = {
                         const res = await fetch(track.data);
                         const buf = await audioCtx.decodeAudioData(await res.arrayBuffer());
                         bgmSource = audioCtx.createBufferSource(); bgmSource.buffer = buf; bgmSource.loop = true;
-                        masterGain = audioCtx.createGain(); masterGain.gain.value = 0.3;
+                        masterGain = audioCtx.createGain(); masterGain.gain.value = BGM_VOLUME;
                         bgmSource.connect(masterGain); masterGain.connect(audioDest); bgmSource.start(0);
                         addSystemLog('Yerel müzik yüklendi: ' + track.name, 'success');
                     }
@@ -2743,7 +2753,7 @@ const RenderWorkerService = {
                         const res = await fetch(musicUrl);
                         const buf = await audioCtx.decodeAudioData(await res.arrayBuffer());
                         bgmSource = audioCtx.createBufferSource(); bgmSource.buffer = buf; bgmSource.loop = true;
-                        masterGain = audioCtx.createGain(); masterGain.gain.value = 0.3;
+                        masterGain = audioCtx.createGain(); masterGain.gain.value = BGM_VOLUME;
                         bgmSource.connect(masterGain); masterGain.connect(audioDest); bgmSource.start(0);
                         addSystemLog('Müzik yüklendi: ' + track.name, 'success');
                     } else { addSystemLog(`Müzik bulunamadı: ${ambientSound}`, 'warn'); }
@@ -2810,7 +2820,7 @@ const RenderWorkerService = {
                     const audioBuf = await audioCtx.decodeAudioData(bufferCopy);
                     const source = audioCtx.createBufferSource(); source.buffer = audioBuf;
                     source.playbackRate.value = 1.0;
-                    const gain = audioCtx.createGain(); gain.gain.value = 0.8;
+                    const gain = audioCtx.createGain(); gain.gain.value = VOICEOVER_VOLUME;
                     source.connect(gain); gain.connect(audioDest); source.start(0);
                     audioEndPromise = new Promise(resolve => { source.onended = resolve; });
                 } catch (e) { addSystemLog(`Slayt ${slideIdx + 1} ses hatası: ${e.message}`, 'warn'); }
@@ -2961,7 +2971,7 @@ const RenderWorkerService = {
         // Nostalji modunda her zaman 60 saniye sınırı — 1 saniye bile geçemez
         let limitSec = isNostalji ? 60.0 : (useForceExact ? bounds.max : 9999);
         let globalRenderedSec = 0;
-        const getAudioDur = (audioData, fallbackText) => { if (audioData?.wavBuffer) { let byteLength = 0; if (audioData.wavBuffer instanceof ArrayBuffer) byteLength = audioData.wavBuffer.byteLength; else if (audioData.wavBuffer.buffer instanceof ArrayBuffer) byteLength = audioData.wavBuffer.buffer.byteLength; else if (audioData.wavBuffer.byteLength) byteLength = audioData.wavBuffer.byteLength; if (byteLength > 44) { const sampleRate = audioData.sampleRate || 24000; return (byteLength - 44) / (sampleRate * 2); } } const wordsCount = (fallbackText || "").trim().split(/\s+/).filter(Boolean).length; if (wordsCount === 0) return 0.5; return Math.max(1.0, wordsCount / getWPS(jobData.config.language)); };
+        const getAudioDur = (audioData, fallbackText) => { if (audioData?.wavBuffer) { let byteLength = 0; if (audioData.wavBuffer instanceof ArrayBuffer) byteLength = audioData.wavBuffer.byteLength; else if (audioData.wavBuffer.buffer instanceof ArrayBuffer) byteLength = audioData.wavBuffer.buffer.byteLength; else if (audioData.wavBuffer.byteLength) byteLength = audioData.wavBuffer.byteLength; if (byteLength > WAV_HEADER_SIZE) { const sampleRate = audioData.sampleRate || SAMPLE_RATE; return (byteLength - WAV_HEADER_SIZE) / (sampleRate * 2); } } const wordsCount = (fallbackText || "").trim().split(/\s+/).filter(Boolean).length; if (wordsCount === 0) return 0.5; return Math.max(1.0, wordsCount / getWPS(jobData.config.language)); };
 
         let rawKapakDur = 1.0;
         let rawSonSozDur = jobData.script.sonSoz ? (getAudioDur(jobData.assets.sonSozAudio, jobData.script.sonSoz) + 0.05) : 0;
@@ -3004,8 +3014,8 @@ const RenderWorkerService = {
                 try {
                     let bufferCopy; if (audioData.wavBuffer instanceof ArrayBuffer) bufferCopy = audioData.wavBuffer.slice(0); else if (audioData.wavBuffer.buffer instanceof ArrayBuffer) bufferCopy = audioData.wavBuffer.buffer.slice(0); else if (typeof audioData.wavBuffer === 'object') { const uint8 = new Uint8Array(Object.values(audioData.wavBuffer)); bufferCopy = uint8.buffer.slice(0); } else bufferCopy = audioData.wavBuffer;
                     const audioBuf = await audioCtx.decodeAudioData(bufferCopy); const source = audioCtx.createBufferSource(); source.buffer = audioBuf;
-                    source.playbackRate.value = 1.0; // Normal okuma hızı
-                    const gain = audioCtx.createGain(); gain.gain.value = 0.8;
+                    source.playbackRate.value = 1.0;
+                    const gain = audioCtx.createGain(); gain.gain.value = VOICEOVER_VOLUME;
                     source.connect(gain); gain.connect(audioDest); source.start(0);
                     baseExactDur = Math.min(audioBuf.duration, 180.0); // Maksimum3 dakika sınırı
                     // Ses bitiş Promise'i — renderScene sonunda bekler (timeout: ses süresi + 5sn)
@@ -3568,19 +3578,19 @@ const RenderWorkerService = {
         try {
             let bgmSource, bgmNode, masterGain;
             const loadBGM = async (musicId) => {
-                if (bgmSource) { try { bgmSource.stop(); bgmSource.disconnect(); } catch(e){} }
-                if (bgmNode) { try { bgmNode.disconnect(); } catch(e){} }
-                if (masterGain) { try { masterGain.disconnect(); } catch(e){} }
+                if (bgmSource) { try { bgmSource.stop(); bgmSource.disconnect(); } catch(e) { /* BGM already stopped */ } }
+                if (bgmNode) { try { bgmNode.disconnect(); } catch(e) { /* BGM node already disconnected */ } }
+                if (masterGain) { try { masterGain.disconnect(); } catch(e) { /* Master gain already disconnected */ } }
                 bgmSource = null; bgmNode = null; masterGain = null;
                 if (!musicId || musicId === 'none') return;
                 const ambientTypes = ['rain', 'wind', 'waves', 'fire'];
                 if (ambientTypes.includes(musicId)) {
                     const ambientObj = AmbientAudioService.getAmbientNode(audioCtx, musicId);
-                    if (ambientObj) { bgmSource = ambientObj.source; bgmNode = ambientObj.gainNode; masterGain = audioCtx.createGain(); masterGain.gain.value = 0.3; bgmNode.connect(masterGain); masterGain.connect(audioDest); }
+                    if (ambientObj) { bgmSource = ambientObj.source; bgmNode = ambientObj.gainNode; masterGain = audioCtx.createGain(); masterGain.gain.value = BGM_VOLUME; bgmNode.connect(masterGain); masterGain.connect(audioDest); }
                 } else if (musicId.startsWith('local_')) {
-                    try { const track = jobData.assets.musicList?.find(m => m.id === musicId); if (track && track.data) { const res = await fetch(track.data); const buf = await audioCtx.decodeAudioData(await res.arrayBuffer()); bgmSource = audioCtx.createBufferSource(); bgmSource.buffer = buf; bgmSource.loop = true; masterGain = audioCtx.createGain(); masterGain.gain.value = 0.3; bgmSource.connect(masterGain); masterGain.connect(audioDest); bgmSource.start(0); } } catch (e) { console.warn("Yerel müzik okunamadı", e); }
+                    try { const track = jobData.assets.musicList?.find(m => m.id === musicId); if (track && track.data) { const res = await fetch(track.data); const buf = await audioCtx.decodeAudioData(await res.arrayBuffer()); bgmSource = audioCtx.createBufferSource(); bgmSource.buffer = buf; bgmSource.loop = true; masterGain = audioCtx.createGain(); masterGain.gain.value = BGM_VOLUME; bgmSource.connect(masterGain); masterGain.connect(audioDest); bgmSource.start(0); } } catch (e) { console.warn("Yerel müzik okunamadı", e); }
                 } else {
-                    try { const track = await AssetManagerService.getMusicFromLib(musicId); if (track && track.data) { const raw = track.data.includes(',') ? track.data.split(',')[1] : track.data; const byteString = atob(raw); const ab = new ArrayBuffer(byteString.length); const ia = new Uint8Array(ab); for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i); const blob = new Blob([ab], { type: 'audio/mpeg' }); const musicUrl = URL.createObjectURL(blob); const res = await fetch(musicUrl); const buf = await audioCtx.decodeAudioData(await res.arrayBuffer()); bgmSource = audioCtx.createBufferSource(); bgmSource.buffer = buf; bgmSource.loop = true; masterGain = audioCtx.createGain(); masterGain.gain.value = 0.3; bgmSource.connect(masterGain); masterGain.connect(audioDest); bgmSource.start(0); } } catch (e) { console.warn("Müzik okunamadı", e); }
+                    try { const track = await AssetManagerService.getMusicFromLib(musicId); if (track && track.data) { const raw = track.data.includes(',') ? track.data.split(',')[1] : track.data; const byteString = atob(raw); const ab = new ArrayBuffer(byteString.length); const ia = new Uint8Array(ab); for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i); const blob = new Blob([ab], { type: 'audio/mpeg' }); const musicUrl = URL.createObjectURL(blob); const res = await fetch(musicUrl); const buf = await audioCtx.decodeAudioData(await res.arrayBuffer()); bgmSource = audioCtx.createBufferSource(); bgmSource.buffer = buf; bgmSource.loop = true; masterGain = audioCtx.createGain(); masterGain.gain.value = BGM_VOLUME; bgmSource.connect(masterGain); masterGain.connect(audioDest); bgmSource.start(0); } } catch (e) { console.warn("Müzik okunamadı", e); }
                 }
             };
             let initialBgmId = jobData.script._bgmId || preferences.ambientSound || 'none';
@@ -3632,7 +3642,7 @@ const RenderWorkerService = {
                             bgmSource.buffer = buf;
                             bgmSource.loop = true;
                             masterGain = audioCtx.createGain();
-                            masterGain.gain.value = 0.3;
+                            masterGain.gain.value = BGM_VOLUME;
                             bgmSource.connect(masterGain);
                             masterGain.connect(audioDest);
                             bgmSource.start(0);
@@ -3650,7 +3660,7 @@ const RenderWorkerService = {
                     bgmSource.buffer = nostalgicBuffer;
                     bgmSource.loop = true;
                     masterGain = audioCtx.createGain();
-                    masterGain.gain.value = 0.3;
+                    masterGain.gain.value = BGM_VOLUME;
                     bgmSource.connect(masterGain);
                     masterGain.connect(audioDest);
                     bgmSource.start(0);
@@ -3667,7 +3677,7 @@ const RenderWorkerService = {
 
             if (tImg) { RenderWorkerService.drawThumbnail(ctx, tImg, jobData.script.thumbnailText, w, h, fontFamily, jobData.config.language, jobData.config.tip, jobData.script._newsDate || ''); if (videoTrack && videoTrack.requestFrame) videoTrack.requestFrame(); for (let i = 0; i < 10; i++) await nextFrame(); }
 
-            const recorder = new MediaRecorder(combinedStream, { mimeType, audioBitsPerSecond: 192000, videoBitsPerSecond: 2000000 });
+            const recorder = new MediaRecorder(combinedStream, { mimeType, audioBitsPerSecond: AUDIO_BITRATE, videoBitsPerSecond: VIDEO_BITRATE });
             const chunks = []; recorder.ondataavailable = e => { if (e.data && e.data.size > 0) chunks.push(e.data); }; recorder.start(100);
 
             sysEventBus.emit('PROGRESS', { step: 'RENDER', percent: 10, text: 'Clickbait Kapak Oluşturuluyor...' });
@@ -4486,7 +4496,7 @@ export default function App() {
                     if (data.files && data.files.length > 0) {
                         localFiles = data.files.map(f => ({ ...f, data: '/api/music/file/' + encodeURIComponent(f.file), isLocalServer: true }));
                     }
-                } catch (e) {}
+                } catch (e) { console.warn('[Music] Local server fetch failed:', e.message); }
                 const combinedMusic = [...allMusic, ...localFiles];
                 setStudioMedia(s => ({ ...s, musicList: combinedMusic, isLoading: false, statusMsg: 'Yerel Mod' }));
                 if (allMusic.length > 0) {
@@ -4541,7 +4551,7 @@ export default function App() {
 
     useEffect(() => {
         if (!isFirebaseActive) { return; }
-        const initAuth = async () => { try { if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) await signInWithCustomToken(auth, __initial_auth_token); else await signInAnonymously(auth); } catch (e) { } };
+        const initAuth = async () => { try { if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) await signInWithCustomToken(auth, __initial_auth_token); else await signInAnonymously(auth); } catch (e) { console.warn('[Auth] Sign-in failed:', e.message); } };
         initAuth();
         const unsubAuth = onAuthStateChanged(auth, async (u) => {
             setUser(u);
@@ -4555,7 +4565,7 @@ export default function App() {
 
     useEffect(() => {
         if (!user || !isFirebaseActive || !isLoadedRef.current) return;
-        const timer = setTimeout(() => { try { setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'user_assets', 'settings'), { config, prefs, voiceFilters, activeTab, textInput, lastUpdated: Date.now() }, { merge: true }).catch(() => { }); } catch (e) { } }, 800);
+        const timer = setTimeout(() => { try { setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'user_assets', 'settings'), { config, prefs, voiceFilters, activeTab, textInput, lastUpdated: Date.now() }, { merge: true }).catch(e => console.warn('[Firestore] Settings save failed:', e.message)); } catch (e) { console.warn('[Firestore] Settings save error:', e.message); } }, 800);
         return () => clearTimeout(timer);
     }, [config, prefs, voiceFilters, activeTab, textInput, user]);
 
@@ -4624,7 +4634,7 @@ export default function App() {
     const handleOutroDelete = async () => { await AssetManagerService.deleteMedia('CUSTOM_OUTRO'); setStudioMedia(s => ({ ...s, outroUrl: null })); await saveToFirestore({ outroChunksCount: null, backCover: null }); };
     const handleCustomSceneImagesUpload = async (e) => { const files = Array.from(e.target.files); if (!files.length) return; const availableSlots = 10 - (studioMedia.customSceneImages?.length || 0); const filesToProcess = files.slice(0, availableSlots); const newB64s = []; for (let file of filesToProcess) { if (file.type.startsWith('image/')) { const b64 = await NetworkUtils.compressImage(file); newB64s.push(b64); } } const updatedImages = [...(studioMedia.customSceneImages || []), ...newB64s].slice(0, 10); for (let i = 0; i < updatedImages.length; i++) await AssetManagerService.saveMedia("CUSTOM_SCENE_IMG_" + i, updatedImages[i]); setStudioMedia(s => ({ ...s, customSceneImages: updatedImages })); const newMediaFiles = newB64s.map((b64, i) => ({ name: `SabitGorsel_${Date.now()}_${i}.jpg`, type: 'image/jpeg', data: b64 })); if (newMediaFiles.length > 0) setUiState(prev => ({ ...prev, selectedMediaFiles: [...prev.selectedMediaFiles, ...newMediaFiles] })); e.target.value = null; };
     const handleCustomSceneImageDelete = async (idx) => { const updated = studioMedia.customSceneImages.filter((_, i) => i !== idx); for (let i = 0; i < 10; i++) await AssetManagerService.deleteMedia("CUSTOM_SCENE_IMG_" + i); for (let i = 0; i < updated.length; i++) await AssetManagerService.saveMedia("CUSTOM_SCENE_IMG_" + i, updated[i]); setStudioMedia(s => ({ ...s, customSceneImages: updated })); };
-    const deleteMusic = async () => { try { const as = prefs.ambientSound; if (as && !['none', 'rain', 'wind', 'waves', 'fire'].includes(as)) { const oldUrl = await AssetManagerService.loadMedia('CUSTOM_MUSIC'); if (oldUrl && oldUrl.startsWith('blob:')) URL.revokeObjectURL(oldUrl); await AssetManagerService.deleteMedia('CUSTOM_MUSIC'); await AssetManagerService.removeMusicFromLib(as); const updatedList = studioMedia.musicList.filter(m => m.id !== as); await saveToFirestore({ bgmList: updatedList, selectedBgmId: null }); setPrefs(p => ({ ...p, ambientSound: 'none' })); } } catch (e) { } };
+    const deleteMusic = async () => { try { const as = prefs.ambientSound; if (as && !['none', 'rain', 'wind', 'waves', 'fire'].includes(as)) { const oldUrl = await AssetManagerService.loadMedia('CUSTOM_MUSIC'); if (oldUrl && oldUrl.startsWith('blob:')) URL.revokeObjectURL(oldUrl); await AssetManagerService.deleteMedia('CUSTOM_MUSIC'); await AssetManagerService.removeMusicFromLib(as); const updatedList = studioMedia.musicList.filter(m => m.id !== as); await saveToFirestore({ bgmList: updatedList, selectedBgmId: null }); setPrefs(p => ({ ...p, ambientSound: 'none' })); } } catch (e) { console.warn('[Music] Delete failed:', e.message); } };
     const handleFolderSelect = async () => {
         if (musicFileInputRef.current) musicFileInputRef.current.click();
     };
@@ -5229,7 +5239,7 @@ export default function App() {
                     <h1 className="text-xl md:text-3xl font-black tracking-tight text-white whitespace-nowrap">OTONOM</h1>
                     <div className="bg-indigo-900/40 border-2 border-indigo-500/50 px-3 py-1.5 rounded-full shadow-[0_0_20px_rgba(99,102,241,0.3)]">
                     <p className="text-indigo-300 text-[10px] md:text-xs font-black tracking-widest uppercase">
-                             Otonom v4.6 <span className="mx-1 text-white">•</span> One-Page
+                             Otonom v4.11 <span className="mx-1 text-white">•</span> One-Page
                          </p>
                     </div>
                 </div>
