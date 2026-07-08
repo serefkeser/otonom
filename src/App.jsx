@@ -2228,7 +2228,7 @@ class MediaSynthesisService {
         try {
             const audioData = await MediaSynthesisService._generateGoogleTTS(cleanText);
             if (audioData) return audioData;
-        } catch (e) { addSystemLog(`Google TTS hatası: ${e.message}`, 'warn'); }
+        } catch (e) { addSystemLog(`VoiceRSS hatası: ${e.message}`, 'warn'); }
         // Sonra Mimo TTS dene
         try {
             const audioData = await MediaSynthesisService._generateMimoTTS(cleanText);
@@ -2265,17 +2265,25 @@ class MediaSynthesisService {
     }
 
     static async _generateGoogleTTS(text) {
-        const q = encodeURIComponent(text);
-        const r = await fetch(`/tts?ie=UTF-8&q=${q}&tl=tr&client=tw-ob`, {
+        const q = encodeURIComponent(text.substring(0, 200));
+        const r = await fetch(`https://api.voicerss.org/?key=fe7e6b6a0e484767bb8afa2f11a2c0e1&hl=tr-tr&src=${q}&c=WAV&f=24000hz_16bit_mono`, {
             signal: AbortSignal.timeout(15000)
         });
-        if (!r.ok) throw new Error(`Google TTS ${r.status}`);
+        if (!r.ok) throw new Error(`VoiceRSS ${r.status}`);
         const blob = await r.blob();
         const arrayBuffer = await blob.arrayBuffer();
         const bytes = new Uint8Array(arrayBuffer);
-        if (bytes.length < 1000) throw new Error('Google TTS çok küçük yanıt');
-        addSystemLog(`Google TTS: ${(bytes.length / 1024).toFixed(0)}KB`, 'success');
-        return { wavBuffer: arrayBuffer, sampleRate: 24000 };
+        if (bytes.length < 1000) throw new Error('VoiceRSS çok küçük yanıt');
+        const headerStr = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]);
+        const sampleRate = 24000;
+        let wavBuffer;
+        if (headerStr === 'RIFF') {
+            wavBuffer = arrayBuffer;
+        } else {
+            wavBuffer = MediaSynthesisService._makeWav(bytes, sampleRate);
+        }
+        addSystemLog(`VoiceRSS: ${(bytes.length / 1024).toFixed(0)}KB`, 'success');
+        return { wavBuffer, sampleRate };
     }
 
     static async _generateMimoTTS(text) {

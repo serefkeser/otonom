@@ -115,13 +115,5 @@ function logServerPlugin() {
 
 export default defineConfig({
   plugins: [react(), tailwindcss(), logServerPlugin()],
-  server: {
-    proxy: {
-      '/tts': {
-        target: 'https://translate.google.com',
-        changeOrigin: true,
-        rewrite: (p) => p.replace(/^\/tts/, '/translate_tts')
-      }
-    }
-  }
+
 })
