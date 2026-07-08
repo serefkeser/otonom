@@ -2282,16 +2282,25 @@ class MediaSynthesisService {
         const bytes = new Uint8Array(binaryStr.length);
         for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
         if (bytes.length < 100) throw new Error('Mimo TTS çok küçük yanıt');
-        // Mimo'nun döndürdüğü ses verisi — WAV header yoksa ekle
         const headerStr = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]);
-        const sampleRate = 24000;
+        let sampleRate = 24000;
         let wavBuffer;
         if (headerStr === 'RIFF') {
             wavBuffer = bytes.buffer;
+            const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+            const fmtSize = view.getUint32(16, true);
+            const audioFormat = view.getUint16(20, true);
+            const numChannels = view.getUint16(22, true);
+            const wavSampleRate = view.getUint32(24, true);
+            const bitsPerSample = view.getUint16(34, true);
+            const dataSize = view.getUint32(40, true);
+            sampleRate = wavSampleRate;
+            addSystemLog(`Mimo TTS(WAV): ${(bytes.length/1024).toFixed(0)}KB fmt=${audioFormat} ch=${numChannels} sr=${wavSampleRate} bps=${bitsPerSample} dataSz=${dataSize}`, 'success');
         } else {
+            const hexPrefix = Array.from(bytes.slice(0, Math.min(8, bytes.length))).map(b => b.toString(16).padStart(2,'0')).join(' ');
             wavBuffer = MediaSynthesisService._makeWav(bytes, sampleRate);
+            addSystemLog(`Mimo TTS(raw): ${(bytes.length/1024).toFixed(0)}KB prefix=[${hexPrefix}]`, 'info');
         }
-        addSystemLog(`Mimo TTS: ${(bytes.length / 1024).toFixed(0)}KB`, 'success');
         wavBuffer = MediaSynthesisService._normalizeWavVolume(wavBuffer);
         return { wavBuffer, sampleRate };
     }
