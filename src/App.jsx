@@ -2224,12 +2224,7 @@ class MediaSynthesisService {
         if (!text || voice === 'none') return null;
         let cleanText = text.replace(/[*_#"']/g, '').replace(/\.\.\./g, ', ').replace(/\n/g, ' ').replace(/[:;/\\|{}[\]<>^~`]/g, ', ').replace(/\s+/g, ' ').trim();
         if (cleanText.length < 2) return null;
-        // Önce Gemini TTS dene (Google Cloud Text-to-Speech)
-        try {
-            const audioData = await MediaSynthesisService._generateGeminiTTS(cleanText);
-            if (audioData) return audioData;
-        } catch (e) { addSystemLog(`Gemini TTS hatası: ${e.message}`, 'warn'); }
-        // Sonra Mimo TTS dene
+        // Önce Mimo TTS dene
         try {
             const audioData = await MediaSynthesisService._generateMimoTTS(cleanText);
             if (audioData) return audioData;
@@ -2268,6 +2263,7 @@ class MediaSynthesisService {
         const payload = {
             model: 'mimo-v2.5-tts',
             messages: [
+                { role: 'system', content: 'Konuşma dilin Türkçe. Doğal, akıcı bir ses tonuyla Türkçe metinleri seslendir.' },
                 { role: 'user', content: text },
                 { role: 'assistant', content: '' }
             ]
