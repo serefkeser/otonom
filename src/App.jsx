@@ -2229,6 +2229,11 @@ class MediaSynthesisService {
             const audioData = await MediaSynthesisService._generateMimoTTS(cleanText);
             if (audioData) return audioData;
         } catch (e) { addSystemLog(`Mimo TTS hatası: ${e.message}`, 'warn'); }
+        // Sonra Google Translate TTS (ücretsiz, Türkçe ses kaliteli)
+        try {
+            const audioData = await MediaSynthesisService._generateGoogleTTS(cleanText);
+            if (audioData) return audioData;
+        } catch (e) { addSystemLog(`Google TTS hatası: ${e.message}`, 'warn'); }
         // SpeechSynthesis dene
         try {
             return await MediaSynthesisService._generateSpeechSynth(cleanText);
@@ -2259,11 +2264,24 @@ class MediaSynthesisService {
         return { wavBuffer: bytes.buffer, sampleRate: 24000 };
     }
 
+    static async _generateGoogleTTS(text) {
+        const q = encodeURIComponent(text);
+        const r = await fetch(`https://translate.google.com/translate_tts?ie=UTF-8&q=${q}&tl=tr&client=tw-ob`, {
+            signal: AbortSignal.timeout(15000)
+        });
+        if (!r.ok) throw new Error(`Google TTS ${r.status}`);
+        const blob = await r.blob();
+        const arrayBuffer = await blob.arrayBuffer();
+        const bytes = new Uint8Array(arrayBuffer);
+        if (bytes.length < 1000) throw new Error('Google TTS çok küçük yanıt');
+        addSystemLog(`Google TTS: ${(bytes.length / 1024).toFixed(0)}KB`, 'success');
+        return { wavBuffer: arrayBuffer, sampleRate: 24000 };
+    }
+
     static async _generateMimoTTS(text) {
         const payload = {
             model: 'mimo-v2.5-tts',
             messages: [
-                { role: 'system', content: 'Konuşma dilin Türkçe. Doğal, akıcı bir ses tonuyla Türkçe metinleri seslendir.' },
                 { role: 'user', content: text },
                 { role: 'assistant', content: '' }
             ]
