@@ -537,6 +537,7 @@ const fetchWithCorsProxy = async (url) => {
     throw new Error('Müzik indirilemedi. Sunucu çalıştığından ve Google Drive dosyasının herkese açık olduğundan emin olun.');
 };
 
+// Gemini API key: localStorage.setItem('ns_gemini_api_key', 'YOUR_KEY') ile ayarlayın
 const getApiKey = () => {
     const envKey = typeof import.meta !== 'undefined' ? import.meta.env.VITE_GEMINI_API_KEY : '';
     return envKey || localStorage.getItem('ns_gemini_api_key') || '';
